@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine,Integer,DATE
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 DATABASE_URL = 'postgresql://postgres:Matthew_Puno04@localhost/CiviReport'
 

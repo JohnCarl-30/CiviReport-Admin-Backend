@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session 
 from database import SessionLocal, engine, Base 
 from pydantic import BaseModel
-from model import User
+from models.users import User
 from passlib.context import CryptContext
 
 
@@ -31,11 +31,21 @@ def get_db():
 
 @app.post("/login")
 def login(user_login: UserLogin, db: Session=Depends(get_db)):
-    user = db.query(User).filter(User.email == user_login.email).first()
-    if not user:
-        raise HTTPException(status_code=400, detail = "Invalid Email")
-    if not pwd_context.verify(user_login.password, user.password):
-        raise HTTPException(status_code=400, detail="Invalid password")
+    try: 
+        user = db.query(User).filter(User.email == user_login.email).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail = "Invalid Email, please double check your email")
+        if not pwd_context.verify(user_login.password, user.password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid password, please double check your password")
+        
+        return {"message" : "Login successfully!"}
+    except HTTPException as http_exc:
+        raise http_exc
     
-    return {"message" : "Login success!"}
+    except Exception as e:
+        print(f"server error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail= "Internal server error. Please try again later."
+        )
 
