@@ -16,4 +16,5 @@ class User(Base):
     date_registered = Column(Date, default=func.current_date())
     role = Column(String(10), default='user')
 
+
     complaints = relationship("Complaint", back_populates="user")
