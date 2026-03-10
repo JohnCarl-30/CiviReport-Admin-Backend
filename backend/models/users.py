@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, Integer, String,Date, func
+from sqlalchemy import Boolean, Column, Integer, String, Date, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -15,6 +15,7 @@ class User(Base):
     password = Column(String(255), nullable=False)
     date_registered = Column(Date, default=func.current_date())
     role = Column(String(10), default='user')
+    is_active = Column(Boolean, default=True)
 
 
     complaints = relationship("Complaint", back_populates="user")

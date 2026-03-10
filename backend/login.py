@@ -1,25 +1,23 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from sqlalchemy.orm import Session 
-from database import SessionLocal, engine, Base 
-from pydantic import BaseModel
-from models.users import User
+from datetime import datetime, timezone
+from typing import Annotated
+import os
+import 
+import jwt
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
+from sqlalchemy.orm import Session
 
+from database import SessionLocal
+from models.users import User
 
-Base.metadata.create_all(bind = engine)
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
 
-app = FastAPI()
-
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
-
-
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def get_db():
@@ -29,23 +27,57 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/login")
-def login(user_login: UserLogin, db: Session=Depends(get_db)):
-    try: 
-        user = db.query(User).filter(User.email == user_login.email).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail = "Invalid Email, please double check your email")
-        if not pwd_context.verify(user_login.password, user.password):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid password, please double check your password")
-        
-        return {"message" : "Login successfully!"}
-    except HTTPException as http_exc:
-        raise http_exc
-    
-    except Exception as e:
-        print(f"server error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail= "Internal server error. Please try again later."
-        )
 
+DbDep = Annotated[Session, Depends(get_db)]
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: DbDep,
+) -> User:
+    credentials_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+   
+    user_id: str | None = payload.get("sub")
+    if user_id is None:
+        raise credentials_exc
+
+     except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except InvalidTokenError:
+        raise credentials_exc
+
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exc
+
+    return user
+
+
+def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+    return current_user
+
+
+CurrentUser = Annotated[User, Depends(get_current_active_user)]

@@ -1,101 +1,111 @@
-from fastapi import FastAPI, Depends, status, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from database import SessionLocal,engine,Base
-from pydantic import BaseModel,field_validator, Field, model_validator
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field, field_validator, model_validator
+from database import SessionLocal, engine, Base
 from models.users import User
-from datetime import date
-from passlib.hash import bcrypt
+from auth import hash_password, DbDep  # reuse from your auth module
 import re
-
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+
+
 class Register(BaseModel):
-    first_name:str
-    middle_name:str
-    last_name:str
-    user_name: str | None = None
-    email:str
-    contact_num:str
-    address:str
+    first_name: str
+    middle_name: str = ""
+    last_name: str
+    suffix: str = ""
+    username: str | None = None
+    email: str
+    contact_num: str
+    address: str
     password: str = Field(..., min_length=8)
     confirm_password: str = Field(..., min_length=8)
-   
-    @field_validator('first_name','middle_name','last_name')
+
+    @field_validator("first_name", "last_name")
     @classmethod
-    def name_not_empty(cls,v):
+    def name_not_empty(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("Name fields cannot be empty!")
-        
-        if any(char.isdigit() for char in v):
-            raise ValueError("Name must not contain any numbers")
-        
+            raise ValueError("Name fields cannot be empty")
+        if any(c.isdigit() for c in v):
+            raise ValueError("Name must not contain numbers")
         return v
-    
-    @model_validator(mode = 'before')
-    def combine_names(cls,values):
-        first = values.get('first_name', '').strip()
-        middle = values.get('middle_name', '').strip()
-        last = values.get('last_name', '').strip()
-        user_name = f"{first}{middle}{last}"
-        values['user_name'] = user_name
+
+    @model_validator(mode="before")
+    @classmethod
+    def build_username(cls, values: dict) -> dict:
+
+        if not values.get("username"):
+            first = values.get("first_name", "").strip().lower()
+            middle = values.get("middle_name", "").strip().lower()
+            last = values.get("last_name", "").strip().lower()
+         
+            values["username"] = f"{first}{middle[0] if middle else ''}{last}"
         return values
-    
-    @field_validator('email')
-    def validate_email(cls, v):
-        email_regex = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-        if not re.match(email_regex,v):
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", v):
             raise ValueError("Invalid email format")
         return v.lower()
-    
-    @field_validator('contact_num')
-    def validate_contact_num(cls, v):
-        phone_rejex = r'^(09|\+639)\d{9}$'
-        if not re.match(phone_rejex,v):
-            raise ValueError("Invalid contact number, make sure that your number is a valid PHL number(+63) with 11 digits")
-        return v
-    @model_validator(mode='after')
-    def check_password(cls, model):
-        if model.password != model.confirm_password:
-            raise ValueError("password do not match! please make sure that your password is consistent")
-        return model
-    @field_validator('address')
-    def validate_address(cls,v):
-        if not v.strip():
-            raise ValueError("Address cannot be empty, please enter your current home address")
-        return v
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-@app.post("/user/")
-def register_user(user: Register, db: Session = Depends(get_db)):
-
-    try:
-        hashed_pass = bcrypt.hash(user.password[:72])
-
-
-        new_user = User(
-            user_name = user.user_name,
-            email = user.email,
-            contact_num = user.contact_num,
-            address=user.address,
-            password = hashed_pass,
-            
-        )
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return {"user_id": new_user.user_id, "message": "Registration Success, new user has been created"}
-    except Exception as e:
-        print(f"server error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail= "Internal server error, please try again later"
+    @field_validator("contact_num")
+    @classmethod
+    def validate_contact_num(cls, v: str) -> str:
+        if not re.match(r"^(09|\+639)\d{9}$", v):
+            raise ValueError(
+                "Invalid contact number — must be a valid PHL number (09XXXXXXXXX or +639XXXXXXXXX)"
             )
+        return v
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Address cannot be empty")
+        return v.strip()
+
+    @model_validator(mode="after")
+    def check_passwords_match(self) -> "Register":
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
+
+
+class UserResponse(BaseModel):
+    user_id: int
+    username: str
+    email: str
+    message: str = "Registration successful"
+
+    model_config = {"from_attributes": True}
+
+    
+
+@app.post("/users/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def register_user(payload: Register, db: DbDep):
+    new_user = User(
+        username=payload.username,
+        email=payload.email,
+        contact_num=payload.contact_num,
+        address=payload.address,
+        password=hash_password(payload.password),
+    )
+
+    db.add(new_user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Email/Username taken")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    db.refresh(new_user)
+    return new_user
