@@ -36,8 +36,10 @@ def login(db: DbDep, form_data: OAuth2PasswordRequestForm = Depends()):
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 def register_user(payload: Register, db: DbDep):
+
+    user_name = f"{payload.first_name} {payload.last_name}"
     new_user = User(
-        user_name=payload.user_name,
+        user_name=user_name,
         email=payload.email.lower(),
         contact_num=payload.contact_num,
         address=payload.address,
