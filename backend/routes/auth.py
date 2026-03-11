@@ -1,47 +1,54 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from models.users import User
-from dependencies import DbDep, verify_password, hash_password, create_access_token
-from schemas.auth import UserLogin, Register, TokenResponse, RegisterResponse
+from dependencies import DbDep, verify_password, hash_password, create_access_token, DUMMY_HASH
+from schemas.auth import Register, TokenResponse, RegisterResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 router = APIRouter()
 
+
 @router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: DbDep = None):
+def login(db: DbDep, form_data: OAuth2PasswordRequestForm = Depends()):
     user = db.query(User).filter(User.email == form_data.username.lower()).first()
 
-   
-    if not user or not verify_password(form_data.password, user.password):
-      
+    if not user:
+        verify_password(form_data.password, DUMMY_HASH)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="Invalid email or password",
         )
 
-    # 3. Create Token
+    if not verify_password(form_data.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
     token = create_access_token(user_id=str(user.user_id))
-    
-    # 4. DAPAT MAY RETURN DITO NA NAG-MAMATCH SA TokenResponse
+
     return {
-        "access_token": token, 
-        "token_type": "bearer"
+        "access_token": token,
+        "token_type": "bearer",
+        "message": "Login successful",
     }
 
-@router.post("/user/", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 def register_user(payload: Register, db: DbDep):
     new_user = User(
         user_name=payload.user_name,
-        email=payload.email,
+        email=payload.email.lower(),
         contact_num=payload.contact_num,
         address=payload.address,
         password=hash_password(payload.password),
     )
+
     db.add(new_user)
 
     try:
         db.commit()
+        db.refresh(new_user)
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -49,5 +56,4 @@ def register_user(payload: Register, db: DbDep):
             detail="Email or username already exists",
         )
 
-    db.refresh(new_user)
     return RegisterResponse(user_id=new_user.user_id)

@@ -44,6 +44,15 @@ class Register(BaseModel):
         values["user_name"] = "".join(parts)
         return values
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+        if not re.match(email_regex, v):
+            raise ValueError("Invalid email format")
+        return v.lower()
+
+
     @field_validator("contact_num")
     @classmethod
     def validate_contact_num(cls, v):
@@ -82,8 +91,9 @@ class LoginResponse(BaseModel):
 class RegisterResponse(BaseModel):
     """Response returned after successful registration."""
     user_id: int = Field(..., description="ID of the newly created user", examples=[1])
-    message: str = Field(..., description="Registration status message", examples=["Registration Success, new user has been created"])
+    message: str = Field(default="Registration successful", description="Registration status message", examples=["Registration successful"])
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    message: str = "Login successful"

@@ -15,6 +15,9 @@ from models.users import User
 load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is not set")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -41,11 +44,15 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(user_id: int) -> str:
+DUMMY_HASH = hash_password("timing-safe-placeholder")
+
+
+def create_access_token(user_id: str) -> str:
+    now = datetime.now(tz=timezone.utc)
     payload = {
         "sub": str(user_id),
-        "iat": datetime.now(tz=timezone.utc),
-        "exp": datetime.now(tz=timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        "iat": now,
+        "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -87,4 +94,4 @@ def get_current_active_user(
     return current_user
 
 
-CurrenFtUser = Annotated[User, Depends(get_current_active_user)]
+CurrentUser = Annotated[User, Depends(get_current_active_user)]
