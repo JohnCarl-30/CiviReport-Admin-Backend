@@ -13,9 +13,9 @@ class UserLogin(BaseModel):
 class Register(BaseModel):
     """Schema for new user registration."""
     first_name: str = Field(..., description="User's first name", examples=["Juan"])
-    middle_name: str = Field(..., description="User's middle name", examples=["Dela"])
+    middle_name: str | None = Field(default=None, description="User's middle name", examples=["Dela"])
     last_name: str = Field(..., description="User's last name", examples=["Cruz"])
-    suffix: str | None = Field(..., description="User's suffix", examples=["Jr."])
+    suffix: str | None = Field(default=None, description="User's suffix", examples=["Jr."])
     user_name: str | None = Field(default=None, description="Auto-generated from first, middle, and last name")
     email: str = Field(..., description="Valid email address", examples=["juan@example.com"])
     contact_num: str = Field(..., description="Philippine phone number (09xx or +639xx)", examples=["09171234567"])
@@ -23,7 +23,7 @@ class Register(BaseModel):
     password: str = Field(..., min_length=8, description="Password (minimum 8 characters)")
     confirm_password: str = Field(..., min_length=8, description="Must match password")
 
-    @field_validator("first_name", "middle_name", "last_name")
+    @field_validator("first_name", "last_name")
     @classmethod
     def name_not_empty(cls, v):
         v = v.strip()
@@ -36,19 +36,13 @@ class Register(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def combine_names(cls, values):
-        first = values.get("first_name", "").strip()
-        middle = values.get("middle_name", "").strip()
-        last = values.get("last_name", "").strip()
-        values["user_name"] = f"{first}{middle}{last}"
+        first = (values.get("first_name") or "").strip()
+        middle = (values.get("middle_name") or "").strip()
+        last = (values.get("last_name") or "").strip()
+        suffix = (values.get("suffix") or "").strip()
+        parts = [p for p in [first, middle, last, suffix] if p]
+        values["user_name"] = "".join(parts)
         return values
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-        if not re.match(email_regex, v):
-            raise ValueError("Invalid email format")
-        return v.lower()
 
     @field_validator("contact_num")
     @classmethod
@@ -78,7 +72,7 @@ class Register(BaseModel):
         return v
 
 
-# ---- Response Models ----
+
 
 class LoginResponse(BaseModel):
     """Response returned after successful login."""
