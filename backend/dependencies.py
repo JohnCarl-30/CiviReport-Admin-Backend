@@ -20,6 +20,7 @@ if not SECRET_KEY:
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+RESET_TOKEN_EXPIRE_MINUTES = 15
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -55,6 +56,43 @@ def create_access_token(user_id: str) -> str:
         "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_reset_token(user_id: str) -> str:
+    now = datetime.now(tz=timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "purpose": "password_reset",
+        "iat": now,
+        "exp": now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_reset_token(token: str) -> str:
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    if payload.get("purpose") != "password_reset":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid token",
+        )
+
+    user_id: str | None = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token",
+        )
+
+    return user_id
 
 
 def get_current_user(
