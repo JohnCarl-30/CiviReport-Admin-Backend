@@ -1,22 +1,18 @@
-# routes.py
 from fastapi import APIRouter, HTTPException
-from passlib.context import CryptContext
-
-from schemas import ForgotPasswordRequest, ResetPasswordRequest
-from otp_service import generate_and_store_otp, verify_otp
-from email_service import send_otp_email
-from models  import get_user_by_email, update_user_password
+from models.users import User
+from schemas.forgot_password import ForgotPasswordRequest, ResetPasswordRequest
+from services.otp_service import generate_and_store_otp, verify_otp
+from services.email_service import send_otp_email
+from dependencies import DbDep, hash_password
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"])
+
 
 @router.post("/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
-    # Replace with your actual DB lookup
-    user = await get_user_by_email(req.email)
+async def forgot_password(req: ForgotPasswordRequest, db: DbDep):
+    user = db.query(User).filter(User.email == req.email).first()
     if not user:
-        # Don't reveal if email exists — always return success
-        return {"message": "If that email exists, an OTP has been sent."}
+        raise HTTPException(status_code=404, detail="Email not found")
 
     otp = await generate_and_store_otp(req.email)
     await send_otp_email(req.email, otp)
@@ -24,12 +20,15 @@ async def forgot_password(req: ForgotPasswordRequest):
 
 
 @router.post("/reset-password")
-async def reset_password(req: ResetPasswordRequest):
+async def reset_password(req: ResetPasswordRequest, db: DbDep):
     valid = await verify_otp(req.email, req.otp)
     if not valid:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
-    hashed = pwd_context.hash(req.new_password)
-    # Replace with your actual DB update
-    await update_user_password(req.email, hashed)
+    hashed = hash_password(req.new_password)
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+    user.password = hashed
+    db.commit()
     return {"message": "Password reset successful"}
